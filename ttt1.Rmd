@@ -1,0 +1,276 @@
+---
+title: "Predict Review Rating Using Sentiment Analysis by R"
+author: "Eyad Alkronz"
+date: "9/30/2021"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+The computational process of automatically determining what feelings a writer is expressing in text is known as sentiment analysis. Sentiment is frequently characterized as a binary contrast (positive vs. negative), but it can also be more nuanced, such as recognizing the exact emotion expressed by an author (like fear, joy or anger).
+ 
+
+
+
+
+## How does it work?
+
+1. Make or find a list of terms that have a strong positive or negative connotation.
+2. Count how many positive and negative terms there are in the text.
+3. Examine the proportion of positive and negative words. Positive sentiment is indicated by a large number of positive words and a small number of negative words, whereas negative emotion is shown by a large number of negative words and a small number of positive words.
+
+
+# The Data
+
+The data used for the project is the TripAdvisor Hotel Review Dataset, A dataset for TripAdvisor Hotel Review, crawled from Tripadvisor  , it consisting of 20k reviews and data avilable on Kaggle on this link
+https://www.kaggle.com/andrewmvd/trip-advisor-hotel-reviews
+
+
+## Load Data
+in this section check if data exists , if not then download it from url ,and then add id for each row in data.frame, this id represent reviewID ,and create new column with name newRating to represent Negative or positive , positive when rating equal three,four or five and negative when rating equal one or two
+```{r loadData , echo=  FALSE ,warning=FALSE}
+
+library(tidytext)
+library(tidyverse)
+library(dplyr)
+
+
+readData<- function(fileName){
+  # check if the file exists
+  if (file.exists(filename)) {
+    data <- read_csv(filename , col_names = TRUE)
+  }else{
+    #read date from url
+    url <-"https://raw.githubusercontent.com/eyad-alkronz/Sentiment-Analysis-Hotel-Reviews-/main/tripadvisor_hotel_reviews.csv"
+    data <- read_csv(url , col_names = TRUE)
+  }
+  
+  # this two lines of code to add id for each row , this id represent reviewID
+  temp<- data.frame(id = seq(1,count(data)%>%pull()))
+  data <- cbind(data, temp) 
+  
+  
+  #this line to create new column newRating 
+  # 1 ,2  equal zero  ,0 represent Negative
+  # 3 , 4 , 5 equal 1 ,1 represent positive
+  data <- data %>%
+    mutate(newRating = ifelse(Rating <= 2   , 0 ,1))
+ 
+  
+  data
+}
+
+# this function has data.frme as input and Split a column into tokens
+tokens <- function(data){
+  data %>% 
+    unnest_tokens(word, Review )  %>%  
+    filter(!word %in% stop_words$word) 
+}
+ 
+ # prepareData  
+  # read file in CSV format
+  filename <- "tripadvisor_hotel_reviews.csv"
+  data <- readData(filename)
+
+  
+ 
+
+```
+
+Looking at the first few rows of the "data", we can see the features which are "id", "Review",
+"Rating", "newRating", Each row represents a single customer review .
+id: represent the review-ID ,
+Review: contains the customer review as text ,
+Rating: contains the customer rating [0,5] ,
+newRating: contains the customer rating [0,1] , zero represent negative impact and one represent positive ,
+                                     
+```{r data-head, echo = TRUE }
+data%>% select( Rating,id,newRating )%>%head()
+```
+
+A summary of the data can confirm that there are no missing values.
+
+```{r data-summary, echo = FALSE}
+summary(data)
+```
+
+
+
+# Exploratory Data Analysis
+
+in this section we visualisation and transformation to explore data in a systematic way,Check for data quality; confirm meaning and prevalence of missing values ,Understand univariate relationships between variables ,Perform an initial assessment on what variables to include and what transformations need to be done on them.
+
+
+
+Visualizing distributions of Rating
+
+```{r Exploratory, echo= TRUE}
+#group by rate Plot
+
+data %>%  
+  ggplot(aes(x= Rating ))+
+  geom_bar(fill="deepskyblue")  
+```
+
+Visualizing distributions of Rating as Negative equal zero  or positive equal one
+```{r Visualising, echo=TRUE}
+ #group by new rate Plot
+data %>%  
+  ggplot(aes(x= newRating ))+
+  geom_bar( fill="deepskyblue" )   
+```
+
+
+## Data Preparation
+The first step, creating or finding a word list (also called a lexicon), is generally the most time-consuming , and then count the number of word in each Sentence
+```{r Preparation, echo=FALSE}
+
+# this function has data.frme as input and Split a column into tokens
+tokens <- function(data){
+  data %>% 
+    unnest_tokens(word, Review )  %>%  
+    filter(!word %in% stop_words$word) 
+}
+
+
+  Review_words <- tokens (data) 
+  
+  
+  #calculate world count for each statment
+  SentenceWithWordCount <- Review_words %>%
+    group_by(id) %>%
+    summarize( WordCount = n()) 
+  
+  data <- data %>% left_join(SentenceWithWordCount  , by="id")
+  
+ 
+
+```
+
+Visualizing relation between Rating and WordCount
+```{r WordCount, echo= TRUE}
+ #groub by new rate Plot
+data%>% group_by(Rating) %>% 
+  summarize(meanCount = mean(WordCount)) %>%
+  ggplot(aes(x = Rating , y = meanCount   ))+
+  geom_point() +
+  geom_line()    
+```
+
+Insight :
+Higher Rated Reviews tend to have less words while, lower rated reviews have very high word count
+
+
+# Sentiment Analysis
+in this analysis , used Bing lexicon for sentiment analysis ,The bing lexicon categorizes words in a binary fashion into positive and negative categories.
+```{r Bing, echo= TRUE}
+ bing <- get_sentiments("bing") %>%
+  select(word, sentiment)%>%
+  mutate(value = ifelse(sentiment == "negative" , 0 , 1) )   
+
+bing%>% count(sentiment)
+
+
+```
+
+Now , join our Review words(tokens) list with bing words and assign value for each words to its value that offered by bing
+```{r assign word with value ,echo=FALSE}
+
+#assign value for each words to its value that offered by bing
+Review_words <- Review_words %>%
+  left_join(bing, by = "word")  
+
+ 
+#i want to replace all NA values to average of statment values for each statment 
+Review_words <- Review_words %>% group_by(id) %>%
+  mutate(value = ifelse(is.na(value), mean(value , na.rm = TRUE),value  ))
+
+
+
+Review_words <-  Review_words %>%
+  mutate(value = ifelse(is.nan(value), 0.5,value  ))
+
+Review_words%>% select(id,newRating,value,word ) %>% head() 
+
+```
+
+Now calculate value for each sentences and create new column with name result , 
+result = average of values for all words in this sentence
+```{r sentences , echo= TRUE}
+
+predicted_rating_per_sentences <-  Review_words%>%
+  group_by(id) %>% 
+  summarize(result = (mean(value)))
+
+
+```
+
+plot histogram for predicted rating per sentences
+
+
+```{r sentencesGeom_histogram , echo= TRUE}
+
+predicted_rating_per_sentences %>% ggplot(aes((result))) +
+  geom_histogram(fill="deepskyblue")
+
+
+```
+
+After applying round() function on result
+
+```{r round , echo= TRUE}
+predicted_rating_per_sentences <- predicted_rating_per_sentences%>% 
+  mutate(result  = round(result))
+
+predicted_rating_per_sentences%>% 
+  ggplot(aes((result))) +
+  geom_bar(fill="deepskyblue")
+```
+
+join predicted rating per sentences with original Data and create new column with name 
+differ to represent deference between predicted Rating and original Rating
+```{r join , echo= TRUE}
+#join predicted_rating_per_sentences with original Data 
+data <- predicted_rating_per_sentences %>% left_join(data ,by = "id")%>%
+  mutate(differ = result - newRating ) 
+
+#plot histogram to show differ 
+data %>% ggplot(aes((differ))) +
+  geom_histogram()
+
+```
+
+## Calculate Accurecy
+
+```{r Accurecy , echo=  TRUE}
+successCount <- data %>% filter(differ == 0) %>% count()%>%pull
+failCout<- data %>% filter(differ != 0) %>% count()%>%pull
+totalCount <- data%>%count()%>%pull
+
+accuracy <- successCount / totalCount
+
+print(paste("Accuracy = ",accuracy))
+```
+
+## Conclusion
+The overall aim is to use Sentiment Analysis technique over user review to predict rating is positive or negative , I found the accuracy after implementing these technique of Sentiment Analysis equal to 0.885 ,Sentiment analysis is not perfect, and as with any automatic analysis of language, you will have errors in your results. It also cannot tell you why a writer is feeling a certain way. However, it can be useful to quickly summarize some qualities of text, especially if you have so much text that a human reader cannot analyze all of it.
+
+
+\pagebreak
+
+# Appendix
+
+## Environment
+
+Operating System:
+```{r environment, echo=FALSE}
+version
+```
+
